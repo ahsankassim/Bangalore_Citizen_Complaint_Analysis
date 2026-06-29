@@ -66,10 +66,10 @@ Temporal trends, ward level performance, agency level performance, category leve
 
 ```bash
 pip install pandas numpy
-jupyter notebook blr_analysis.ipynb
+jupyter notebook Complaint_Log_Analysis_Notebook.ipynb
 ```
 
-All charts were built separately in Power BI and exported as images into `assets/`; the notebook covers data cleaning and metric computation only.
+All charts and stat cards were built separately in Power BI and power point respectively and exported as images into `assets/`; the notebook covers data cleaning and metric computation only.
 
 ---
 
