@@ -21,8 +21,40 @@ def cross_fill(df , missing, source):
         y = df[(df[source] == x) & (df[missing].notna())][missing].iloc[0]
         df.loc[(df[source] == x ) & (df[missing].isna()), missing] = y 
 
+
+#helper_4.1
+def isolate_dataframe(category):
+    group = df.groupby([f'{category}_title', f'{category}_id'])
+
+    stats = group.agg(complaint_count=('created_at','count')).reset_index()
+
+    complaint_status = df.groupby([f'{category}_title', f'{category}_id', 'complaint_status_title']).size().unstack(fill_value=0).reset_index()
+    stats = pd.merge(stats, complaint_status, on=[f'{category}_title', f'{category}_id'], how='left')
+
+    comments = group['comment_count'].sum().reset_index(name='total_comments')
+    stats = pd.merge(stats, comments, how='left', on=[f'{category}_title', f'{category}_id'])
+
+    stats.columns = stats.columns.str.replace('-', '_').str.lower()
+
+    return stats
+
+
+#helper_4.2
+def metric_calculation(stats):
+
+    stats['complaint_acceptance_rate'] =\
+    stats[['resolved', 'on_the_job','rejected','closed','re_opened']].sum(axis=1)/\
+    stats['complaint_count']
+    stats['complaint_resolution_rate'] = stats['resolved']/stats['complaint_count']
+    stats['effective_resolution_rate'] = stats['complaint_resolution_rate'] / stats['complaint_acceptance_rate']
+    stats['complaint_ignorance_rate'] = stats[['rejected','closed']].sum(axis=1)/stats['complaint_count']
+    stats['complaint_re_opening_rate'] = stats['re_opened']/stats['complaint_count']
+    stats['comments_per_complaint'] = (stats['total_comments'] / stats['complaint_count']).round(2)
+
+    return stats
+
 # %%
-df_original = pd.read_csv(r'data\blr_city_complain_log_2019_2022.csv', encoding="cp1252")
+df_original = pd.read_csv(r'data\Complaint_log_Analysis(raw).csv', encoding="cp1252")
 df = df_original.copy()
 
 # %%
@@ -310,7 +342,7 @@ df['civic_agency_id'] = df['civic_agency_id'].fillna(-1)
 df_clean = df.copy()
 
 # %%
-# df_clean.to_csv(r'data\blr_city_complain_log_analysis(cleaned).csv')
+# df_clean.to_csv(r'data\Complaint_log_Analysis.csv(cleaned).csv')
 
 # %% [markdown]
 # **______________________________________________________________________________________________________________________________________________________________________________**
@@ -409,32 +441,11 @@ df[df['category_title'] == 'Covid 19']['created_at'].count()
 df['complaint_status_title'].value_counts(normalize=True)*100
 
 # %%
-#ward performance metrics
-ward = df.groupby(['ward_title', 'ward_id'])
-
-ward_stats = ward.agg(complaint_count=('created_at', 'count')).reset_index()
-
-complaint_status = df.groupby(['ward_title','ward_id','complaint_status_title']).size().unstack(fill_value=0).reset_index()
-ward_stats = pd.merge(ward_stats,complaint_status, on=['ward_title','ward_id'], how='left')
-
-comments = ward['comment_count'].sum().reset_index(name='total_comments')
-ward_stats = pd.merge(ward_stats, comments, how='left', on=['ward_title','ward_id'])
-
-ward_stats.columns = ward_stats.columns.str.replace('-', '_').str.lower()
+ward_stats = isolate_dataframe('ward')
+ward_stats_org = metric_calculation(ward_stats)
 
 # %%
-ward_stats['complaint_acceptance_rate'] =\
-    ward_stats[['resolved', 'on_the_job','rejected','closed','re_opened']].sum(axis=1)/\
-    ward_stats['complaint_count']
-ward_stats['complaint_resolution_rate'] = ward_stats['resolved']/ward_stats['complaint_count']
-ward_stats['complaint_ignorance_rate'] = ward_stats[['rejected','closed']].sum(axis=1)/ward_stats['complaint_count']
-ward_stats['complaint_re_opening_rate'] = ward_stats['re_opened']/ward_stats['complaint_count']
-ward_stats['comments_per_complaint'] = (ward_stats['total_comments'] / ward_stats['complaint_count']).round(2)
-ward_stats['effective_resolution_rate'] = ward_stats['complaint_resolution_rate'] / ward_stats['complaint_acceptance_rate']
-
-# %%
-ward_stats_org = ward_stats[ward_stats.columns[:10]]
-ward_stats = ward_stats.drop(columns=ward_stats.columns[3:10])
+ward_stats = ward_stats_org.drop(columns=ward_stats_org.columns[3:10])
 
 # %%
 ward_stats
@@ -509,46 +520,40 @@ ward_stats[complaints >= 100].sort_values(by='complaint_count', ascending=False)
 
 # %%
 # a helper function to pick out the ward titles by the respective sorting order
-def ward_stat_picker(column_name, ascending=False, force = 10):
+def ward_stat_picker(column_name, ascending=False, volume = 10):
     if ascending:
-        daf = ward_stats[ward_stats['complaint_count']>100].sort_values(by= column_name, ascending=True).head(force)
+        daf = ward_stats[ward_stats['complaint_count']>100].sort_values(by= column_name, ascending=True).head(volume)
         duf = list(daf['ward_title'])    
         return duf
     else:
-        daf = ward_stats[ward_stats['complaint_count']>100].sort_values(by= column_name, ascending=False).head(force)
+        daf = ward_stats[ward_stats['complaint_count']>100].sort_values(by= column_name, ascending=False).head(volume)
         duf = list(daf['ward_title'])    
         return duf
 
 # %%
 # a helper to pick out the most common wards to figure out performance of the wards.
+from collections import Counter
+
 def top_10(positive_cols, negative_cols, mode='best'):
-    if mode == 'best':
-        empty = []
+
+    empty = []
+
+    if mode == 'best': 
         for i in positive_cols:
             empty.extend(ward_stat_picker(i))
         for i in negative_cols:
             empty.extend(ward_stat_picker(i, ascending=True))
-        from collections import Counter
 
-        count = Counter(empty)
-        best_10 = []
-        for ward, appearances in count.most_common():
-            best_10.append(f"{ward}: {appearances}")
-        return best_10
-
-    if mode == 'worst':
-        empty = []
+    elif mode == 'worst':
         for i in positive_cols:
             empty.extend(ward_stat_picker(i, ascending=True))
         for i in negative_cols:
             empty.extend(ward_stat_picker(i))
-        from collections import Counter
 
-        count = Counter(empty)
-        worst_10 = []
-        for ward, appearances in count.most_common():
-            worst_10.append(f"{ward}: {appearances}")
-        return worst_10
+    else: raise ValueError(f'Mode must be either "best" or "worst", got {mode!r}')
+
+    count = Counter(empty)
+    return [f"{ward}: {appearances}" for ward, appearances in count.most_common()]
 
 # %%
 pos_cols = ['complaint_count', 'complaint_acceptance_rate','complaint_resolution_rate','effective_resolution_rate']
@@ -672,34 +677,11 @@ ward_stats.to_csv(r'data/ward_stats.csv')
 # **Note:** Same status assumptions from the ward Analysis section apply here.
 
 # %%
-# Agency Performance Metrics
-
-agency = df.groupby(['civic_agency_title', 'civic_agency_id'])
-
-agency_stats = agency.agg(complaint_count=('created_at', 'count')).reset_index()
-
-complaint_status_agency = df.groupby(['civic_agency_title', 'civic_agency_id', 'complaint_status_title']).size()\
-    .unstack(fill_value=0).reset_index()
-agency_stats = pd.merge(agency_stats, complaint_status_agency, on=['civic_agency_title', 'civic_agency_id'], how='left')
-
-comments = agency['comment_count'].sum().reset_index(name='total_comments')
-agency_stats = pd.merge(agency_stats, comments, how='left', on=['civic_agency_title','civic_agency_id'])
-
-agency_stats.columns = agency_stats.columns.str.replace('-', '_').str.lower()
+agency_stats = isolate_dataframe('civic_agency')
+agency_stats_org =  metric_calculation(agency_stats)
 
 # %%
-agency_stats['complaint_acceptance_rate'] = \
-    agency_stats[['resolved', 'on_the_job', 'rejected', 'closed', 're_opened']].sum(axis=1)/\
-    agency_stats['complaint_count'] 
-agency_stats['complaint_resolution_rate'] = agency_stats['resolved'] / agency_stats['complaint_count'] 
-agency_stats['complaint_ignorance_rate'] = agency_stats[['rejected', 'closed']].sum(axis=1) / agency_stats['complaint_count'] 
-agency_stats['complaint_re_opening_rate'] = agency_stats['re_opened'] / agency_stats['complaint_count'] 
-agency_stats['comments_per_complaint'] = (agency_stats['total_comments'] / agency_stats['complaint_count'])
-agency_stats['effective_resolution_rate'] = agency_stats['complaint_resolution_rate'] / agency_stats['complaint_acceptance_rate']
-
-# %%
-agency_stats_org = agency_stats[agency_stats.columns[:10]]
-agency_stats = agency_stats.drop(columns=agency_stats.columns[3:10])
+agency_stats = agency_stats_org.drop(columns=agency_stats_org.columns[3:10])
 agency_stats = agency_stats.rename(columns={'civic_agency_id' : 'agency_id', 'civic_agency_title' : 'agency_title'})
 
 # %% [markdown]
@@ -762,32 +744,11 @@ df.groupby('civic_agency_title')['category_title'].value_counts()
 # **Note:** Same status assumptions from the category Analysis section apply here.
 
 # %%
-# Category performance metrics
-category = df.groupby(['category_title', 'category_id'])
-
-category_stats = category.agg(complaint_count=('created_at', 'count')).reset_index()
-
-complaint_status = df.groupby(['category_title','category_id','complaint_status_title']).size().unstack(fill_value=0).reset_index()
-category_stats = pd.merge(category_stats, complaint_status, on=['category_title','category_id'], how='left')
-
-comments = category['comment_count'].sum().reset_index(name='total_comments')
-category_stats = pd.merge(category_stats, comments, how='left', on=['category_title','category_id'])
-
-category_stats.columns = category_stats.columns.str.replace('-', '_').str.lower()
+category_stats = isolate_dataframe('category')
+category_stats_org = metric_calculation(category_stats)
 
 # %%
-category_stats['complaint_acceptance_rate'] =\
-    category_stats[['resolved', 'on_the_job','rejected','closed','re_opened']].sum(axis=1)/\
-    category_stats['complaint_count']
-category_stats['complaint_resolution_rate'] = category_stats['resolved']/category_stats['complaint_count']
-category_stats['complaint_ignorance_rate'] = category_stats[['rejected','closed']].sum(axis=1)/category_stats['complaint_count']
-category_stats['complaint_re_opening_rate'] = category_stats['re_opened']/category_stats['complaint_count']
-category_stats['comments_per_complaint'] = (category_stats['total_comments'] / category_stats['complaint_count']).round(2)
-category_stats['effective_resolution_rate'] = category_stats['complaint_resolution_rate'] / category_stats['complaint_acceptance_rate']
-
-# %%
-category_stats_org = category_stats[category_stats.columns[:10]]
-category_stats = category_stats.drop(columns=category_stats.columns[3:10])
+category_stats = category_stats_org.drop(columns=category_stats_org.columns[3:10])
 
 # %%
 cols = ['complaint_count','complaint_acceptance_rate','complaint_resolution_rate','complaint_ignorance_rate','complaint_re_opening_rate','comments_per_complaint']
@@ -928,7 +889,7 @@ selected_cats = ['Storm Water Drains','Trees and Saplings','Mobility - Roads, Fo
     'Street lighting','Garbage and Unsanitary Practices','Traffic and Road Safety','Community Infrastructure and Services']
 
 # %%
-#sub_category performance metrics
+#I had to include category title together with sub category for better analysis, hence code written manually
 sub_category = df[df['category_title'].isin(selected_cats)].groupby(['category_title','sub_category_title', 'sub_category_id'])
 
 sub_category_stats = sub_category.agg(complaint_count=('created_at', 'count')).reset_index()
@@ -943,24 +904,17 @@ sub_category_stats = pd.merge(sub_category_stats, comments, how='left', on=['sub
 sub_category_stats.columns = sub_category_stats.columns.str.replace('-', '_').str.lower()
 
 # %%
-sub_category_stats['complaint_acceptance_rate'] =\
-    sub_category_stats[['resolved', 'on_the_job','rejected','closed','re_opened']].sum(axis=1)/\
-    sub_category_stats['complaint_count']
-sub_category_stats['complaint_resolution_rate'] = sub_category_stats['resolved']/sub_category_stats['complaint_count']
-sub_category_stats['complaint_ignorance_rate'] = sub_category_stats[['rejected','closed']].sum(axis=1)/sub_category_stats['complaint_count']
-sub_category_stats['complaint_re_opening_rate'] = sub_category_stats['re_opened']/sub_category_stats['complaint_count']
-sub_category_stats['comments_per_complaint'] = (sub_category_stats['total_comments'] / sub_category_stats['complaint_count']).round(2)
-sub_category_stats['effective_resolution_rate'] = sub_category_stats['complaint_resolution_rate'] / sub_category_stats['complaint_acceptance_rate']
+sub_category_stats_org = metric_calculation(sub_category_stats)
+
+# %%
+sub_category_stats_org = sub_category_stats[sub_category_stats.columns[:11]]
+sub_category_stats = sub_category_stats.drop(columns=sub_category_stats.columns[4:11])
 
 # %%
 sub_category_stats
 
 # %%
 sub_category_stats[sub_category_stats['complaint_count'].ge(30)].groupby('category_title').size()
-
-# %%
-sub_category_stats_org = sub_category_stats[sub_category_stats.columns[:11]]
-sub_category_stats = sub_category_stats.drop(columns=sub_category_stats.columns[4:11])
 
 # %%
 print('gt20 categories')
@@ -995,7 +949,7 @@ inspect('Community Infrastructure and Services')
 # 
 # - ***Garbage and Unsanitary Practices*** category has only one subcategory `Clearance Of Garbage Dump Or Black Spot` pulling most of the weight with 3100 complaints registered to it out of 3933 complaints, which is also confirmed by the cv of 1.89, and that sub category also has a CPC of 2.07 and resolution rate of 55.32% which explains the category leading in both the metrics.
 #     - Complaints regarding new garbage units `'Build Garbage/Waste Composting Units' sub category` are solved effectively once acknowledged, as evidenced by an effective resolution rate of 75% (9/12).
-# - As indicated by a cv of 1.38 in ***street lighting*** category, `Maintenance/Repair Of Streetlight` sub category is the hero with 1292/1498 complaints under it, with an 84% effective resolution rate. Moreover it's worth mentioning that none of the sub categories under this has ignored any complaints which is also emphasized in the category level insights.
+# - As indicated by a cv of 1.38 in ***street lighting*** category, `Maintenance/Repair Of Streetlight` sub category is the hero with 1292/1498 complaints under it, with an 84% effective resolution rate. Moreover it's worth mentioning that none of the qualified sub categories under this has ignored any complaints which is also emphasized in the category level insights.
 # - With only two meaningful sub categories under ***Animal Husbandry*** and with one sub category registered with 770/801 complaints, it is indeed carried by one single sub category which defines most of its performance.
 # - ***In Mobility - Roads, Footpaths and Infrastructure category***, two(`Tarring Or Asphalting Of Existing Road` and `Fixing/Reparing Potholes`) out of 11 of its sub categories are registered with 3863 complaints, which explains a cv of 1.72. However the two sub categories having the highest acceptance rates (69.65% and 62.1% respectively) has the lowest effective resolution rates (50.84% & 55.83%) than its other sub catgories which generally sits between 62-70%.
 # - ***Trees and saplings*** have only one meaningful sub category.
@@ -1072,6 +1026,9 @@ complaint_type_stats
 # 
 
 # %%
-# df.to_csv('data/blr_city_complain_log_2019_2022(processed).csv')
+# df.to_csv('data/Complaint_log_Analysis.csv(processed).csv')
+
+# %%
+
 
 
